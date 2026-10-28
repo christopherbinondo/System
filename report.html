@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Report an incident | Incident Desk</title>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="content">
+  <header class="bar">
+    <div>
+      <h1><i data-lucide="plus-circle"></i>Report an incident</h1>
+      <p>Tell us what happened and where. Add a photo and Incident AI will describe it.</p>
+    </div>
+  </header>
+  <div id="alert" class="alert" hidden role="alert"></div>
+  <main class="single">
+    <section class="panel reveal" aria-labelledby="h-report">
+      <h2 id="h-report"><i data-lucide="clipboard-list"></i>Incident details</h2>
+      <form id="form">
+        <div class="row">
+          <label>Your name <input id="reporter" required maxlength="60"></label>
+          <label>Category <select id="category"></select></label>
+        </div>
+        <label>Location <input id="location" required maxlength="80" placeholder="e.g. Gym, 2nd floor hallway"></label>
+        <label>What happened <textarea id="description" maxlength="300" rows="3" placeholder="Describe it in your own words, or add a photo and let Incident AI describe it"></textarea></label>
+        <label class="drop"><input type="file" id="photo" accept="image/jpeg,image/png,image/gif,image/webp"><i data-lucide="image-plus"></i> Add a photo (JPEG, PNG, GIF or WebP, up to 5 MB)</label>
+        <p id="photoMsg" class="small" aria-live="polite"></p>
+        <div id="photoBox" class="photo-box" hidden>
+          <img id="preview" class="preview" alt="Preview of the selected photo">
+          <div class="ai-row">
+            <button type="button" id="aiDescribe"><i data-lucide="wand-2"></i>Describe again with Incident AI</button>
+            <button type="button" class="ai-cancel" id="aiCancel" hidden><i data-lucide="x"></i>Cancel</button>
+            <button type="button" id="removePhoto"><i data-lucide="trash-2"></i>Remove photo</button>
+            <span id="aiNote" class="small" aria-live="polite"></span>
+          </div>
+          <label>AI photo description (you can edit it) <textarea id="aiText" maxlength="600" rows="3"></textarea></label>
+        </div>
+        <label class="check"><input type="checkbox" id="urgent"> This is urgent (someone may be hurt or in danger)</label>
+        <button type="submit" class="primary"><i data-lucide="send"></i>Submit report</button>
+      </form>
+      <div id="done" class="done" hidden role="status"></div>
+    </section>
+  </main>
+</div>
+<script src="core.js"></script>
+<script src="ai.js"></script>
+<script>
+let imgBlob = null, imgThumb = '';
+$('category').innerHTML = CATEGORIES.map(c => '<option>' + c + '</option>').join('');
+const pm = t => { $('photoMsg').textContent = t; };
+function pageRender() { showAlert(); refreshIcons(); }
+
+function busy(on) { $('aiDescribe').disabled = on; $('photo').disabled = on; $('aiCancel').hidden = !on; }
+
+async function describe() {
+  if (!imgBlob) return;
+  busy(true);
+  $('aiNote').textContent = 'Incident AI is looking at the photo... this can take up to 30 seconds.';
+  const prompt = 'You help a school incident desk. Look at the photo and reply with ONLY a valid JSON object, no markdown, no code fences, in exactly this shape: ' +
+    '{"description":"<2 to 3 plain sentences describing what is visible that matters for an incident report>","category":"<one of: ' + CATEGORIES.join(', ') +
+    '>","urgent":true or false,"reason":"<one short sentence>"}. Set urgent to true only if the photo shows someone hurt, fire, smoke or other danger. Do not name or identify people.' +
+    ($('location').value.trim() ? ' Location: ' + $('location').value.trim().slice(0, 80) + '.' : '') +
+    ($('description').value.trim() ? ' Reporter note: ' + $('description').value.trim().slice(0, 300) : '');
+  try {
+    const reply = await askAI(prompt, imgBlob), d = extractJson(reply);
+    if (d && typeof d.description === 'string' && d.description.trim()) {
+      $('aiText').value = d.description.trim().slice(0, 600);
+      if (CATEGORIES.includes(d.category)) $('category').value = d.category;
+      if (d.urgent === true) $('urgent').checked = true;
+      $('aiNote').textContent = 'Done.' + (typeof d.reason === 'string' && d.reason ? ' ' + d.reason : '') + ' Please check before submitting.';
+    } else if (reply.trim()) { $('aiText').value = reply.trim().slice(0, 600); $('aiNote').textContent = 'Done. Please check before submitting.'; }
+    else $('aiNote').textContent = 'Incident AI gave an empty answer. Type the description yourself.';
+  } catch (err) { $('aiNote').textContent = err.message; }
+  busy(false);
+}
+
+$('photo').addEventListener('change', async e => {
+  const f = e.target.files[0]; if (!f) return;
+  pm('');
+  if (!IMAGE_TYPES.includes(f.type)) { pm('Use a JPEG, PNG, GIF or WebP photo.'); e.target.value = ''; return; }
+  if (f.size > 5 * 1024 * 1024) { pm('That photo is over 5 MB. Choose a smaller one.'); e.target.value = ''; return; }
+  try { imgBlob = await shrink(f, 1280, 0.85); imgThumb = await blobToDataURL(await shrink(f, 600, 0.7)); }
+  catch (err) { pm(err.message); e.target.value = ''; return; }
+  $('preview').src = imgThumb; $('photoBox').hidden = false; $('aiText').value = '';
+  describe();
+});
+$('aiDescribe').addEventListener('click', describe);
+$('removePhoto').addEventListener('click', () => {
+  imgBlob = null; imgThumb = ''; $('photo').value = ''; $('photoBox').hidden = true; $('aiText').value = ''; $('aiNote').textContent = '';
+});
+
+$('form').addEventListener('submit', e => {
+  e.preventDefault();
+  const ai = $('aiText').value.trim(), text = $('description').value.trim() || ai;
+  if (!text) { pm('Describe what happened, or add a photo.'); return; }
+  const r = addReport({ reporter: $('reporter').value.trim(), category: $('category').value, location: $('location').value.trim(),
+    description: text, urgent: $('urgent').checked, image: imgThumb, aiDescription: ai });
+  e.target.reset(); $('removePhoto').click(); pm('');
+  const d = $('done'); d.hidden = false;
+  d.textContent = 'Report ' + r.id + ' recorded' + (r.urgent ? ' and flagged urgent' : '') + (r.imageDropped ? ' (the photo was too large to keep in this browser)' : '') + '. ';
+  const a = document.createElement('a'); a.href = 'records.html'; a.textContent = 'View incident records';
+  d.appendChild(a);
+});
+render();
+</script>
+</body>
+</html>

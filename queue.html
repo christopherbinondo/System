@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Processing queue | Incident Desk</title>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="content">
+  <header class="bar">
+    <div>
+      <h1><i data-lucide="list-ordered"></i>Processing queue</h1>
+      <p>Urgent reports are always taken first. Within each line, reports are served in the order received.</p>
+    </div>
+  </header>
+  <div id="alert" class="alert" hidden role="alert"></div>
+  <main>
+    <section class="panel reveal" aria-labelledby="h-queue">
+      <h2 id="h-queue"><i data-lucide="layers"></i>Waiting reports</h2>
+      <div class="queues">
+        <div><h3><span><i data-lucide="alert-triangle"></i>Urgent</span> <span id="uCount">0</span></h3><ol id="uList"></ol></div>
+        <div><h3><span><i data-lucide="list"></i>Regular</span> <span id="nCount">0</span></h3><ol id="nList"></ol></div>
+      </div>
+      <button id="next" class="primary"><i data-lucide="play-circle"></i>Process next report</button>
+      <p id="msg" class="hint" aria-live="polite"></p>
+    </section>
+    <section class="panel reveal" aria-labelledby="h-hist">
+      <h2 id="h-hist"><i data-lucide="rotate-ccw"></i>Recent changes</h2>
+      <p class="hint">Newest first. Undo takes back the latest change.</p>
+      <ul id="history" class="history"></ul>
+      <button id="undo"><i data-lucide="undo-2"></i>Undo last change</button>
+    </section>
+  </main>
+</div>
+<script src="core.js"></script>
+<script>
+const li = r => '<li>' + r.id + ' ' + esc(r.category) + ' <span class="small">' + esc(r.location) + '</span></li>';
+function pageRender() {
+  const u = urgentQ.toArray(), n = regularQ.toArray();
+  $('uCount').textContent = u.length; $('nCount').textContent = n.length;
+  $('uList').innerHTML = u.map(li).join(''); $('nList').innerHTML = n.map(li).join('');
+  $('history').innerHTML = history.toArray().slice(0, 8).map(h => '<li>' + h.id + ': ' + h.from + ' to ' + h.to + '</li>').join('') || '<li>No changes yet.</li>';
+  showAlert();
+  refreshIcons();
+}
+$('next').addEventListener('click', () => {
+  const r = processNext();
+  $('msg').textContent = r ? r.id + ' is now In Progress' + (r.urgent ? ' (urgent).' : '.') : 'The queue is empty.';
+});
+$('undo').addEventListener('click', () => {
+  const h = undoLast();
+  $('msg').textContent = h ? 'Undid ' + h.id + ': back to ' + h.from + '.' : 'Nothing to undo.';
+});
+render();
+</script>
+</body>
+</html>

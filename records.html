@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Incident records | Incident Desk</title>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="content">
+  <header class="bar">
+    <div>
+      <h1><i data-lucide="archive"></i>Incident records</h1>
+      <p>Search, sort and update every report.</p>
+    </div>
+    <a class="btn" href="report.html"><i data-lucide="plus-circle"></i>Report an incident</a>
+  </header>
+  <div id="alert" class="alert" hidden role="alert"></div>
+  <main>
+    <section class="panel wide reveal" aria-labelledby="h-list">
+      <h2 id="h-list"><i data-lucide="table-2"></i>All reports</h2>
+      <div class="tools">
+        <div class="tabs" role="tablist">
+          <button data-view="all" class="on">All</button>
+          <button data-view="pending">Pending</button>
+          <button data-view="resolved">Resolved</button>
+        </div>
+        <label>Sort by
+          <select id="sort">
+            <option value="new">Date, newest first</option>
+            <option value="old">Date, oldest first</option>
+            <option value="status">Status</option>
+          </select>
+        </label>
+        <form id="searchForm" class="search">
+          <select id="searchBy"><option value="id">Incident ID</option><option value="cat">Category</option></select>
+          <input id="searchText" placeholder="Search records" aria-label="Search text">
+          <button><i data-lucide="search"></i>Search</button>
+          <button type="button" id="clear"><i data-lucide="x"></i>Clear</button>
+        </form>
+        <button type="button" id="clearResolved"><i data-lucide="check-check"></i>Clear resolved</button>
+        <button type="button" id="clearAll" class="danger"><i data-lucide="trash-2"></i>Clear all</button>
+      </div>
+      <p id="count" class="hint"></p>
+      <div class="scroll"><table>
+        <thead><tr><th>ID</th><th>Photo</th><th>Category</th><th>Details</th><th>Reported</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table></div>
+    </section>
+  </main>
+</div>
+<script src="core.js"></script>
+<script>
+function pageRender() {
+  showAlert();
+  let list = found || records.toArray();
+  if (view === 'pending') list = list.filter(r => r.status !== 'Resolved');
+  if (view === 'resolved') list = list.filter(r => r.status === 'Resolved');
+  const s = $('sort').value;
+  list = insertionSort(list, s === 'status' ? (a, b) => RANK[a.status] - RANK[b.status] || a.created - b.created
+    : s === 'old' ? (a, b) => a.created - b.created : (a, b) => b.created - a.created);
+  $('count').textContent = list.length + ' record' + (list.length === 1 ? '' : 's') + (found ? ' matching your search' : '');
+  $('rows').innerHTML = list.length ? list.map(r =>
+    '<tr class="' + (r.urgent && r.status !== 'Resolved' ? 'urgent' : '') + '"><td class="id">' + r.id + '</td>' +
+    '<td>' + (r.image ? '<img class="thumb" src="' + esc(r.image) + '" alt="Photo for ' + r.id + '" title="Click to enlarge">' : '<span class="small">None</span>') + '</td>' +
+    '<td>' + esc(r.category) + tagU(r) + '</td>' +
+    '<td>' + esc(r.description) + (r.aiDescription ? '<div class="aiTag"><i data-lucide="sparkles"></i>AI photo description: ' + esc(r.aiDescription) + '</div>' : '') +
+    '<div class="small">' + esc(r.location) + ' | by ' + esc(r.reporter) + '</div></td>' +
+    '<td class="small">' + fmt(r.created) + '</td>' +
+    '<td><select class="st-' + r.status.replace(' ', '') + '" data-id="' + r.id + '" aria-label="Status of ' + r.id + '">' +
+    STATUSES.map(st => '<option' + (st === r.status ? ' selected' : '') + '>' + st + '</option>').join('') + '</select></td>' +
+    '<td><button type="button" class="danger" data-del="' + r.id + '" aria-label="Delete ' + r.id + '"><i data-lucide="trash-2"></i>Delete</button></td></tr>').join('')
+    : '<tr><td colspan="7" class="empty"><i data-lucide="inbox"></i>No incidents to show.</td></tr>';
+  refreshIcons();
+}
+$('rows').addEventListener('change', e => { if (e.target.dataset.id) setStatus(records.findById(e.target.dataset.id), e.target.value); });
+$('rows').addEventListener('click', e => { if (e.target.classList.contains('thumb')) e.target.classList.toggle('big'); });
+$('rows').addEventListener('click', e => {
+  const id = e.target.dataset.del;
+  if (!id) return;
+  const r = records.findById(id);
+  if (!r) return;
+  const warn = r.status !== 'Resolved' ? '\n\nThis report is still ' + r.status + (r.urgent ? ' and URGENT' : '') + '.' : '';
+  if (confirm('Permanently delete ' + id + '?' + warn)) {
+    if (found) found = found.filter(x => x.id !== id);
+    deleteReport(id);
+  }
+});
+document.querySelector('.tabs').addEventListener('click', e => {
+  if (!e.target.dataset.view) return;
+  view = e.target.dataset.view;
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b === e.target));
+  render();
+});
+$('sort').addEventListener('change', render);
+$('searchForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const q = $('searchText').value.trim().toLowerCase();
+  if (!q) { found = null; render(); return; }
+  const by = $('searchBy').value;
+  found = records.search(r => (by === 'id' ? r.id.toLowerCase() : r.category.toLowerCase()).includes(q));
+  render();
+});
+$('clear').addEventListener('click', () => { found = null; $('searchText').value = ''; render(); });
+
+$('clearResolved').addEventListener('click', () => {
+  const n = records.search(r => r.status === 'Resolved').length;
+  if (!n) { alert('There are no resolved incidents to clear.'); return; }
+  if (confirm('Permanently delete ' + n + ' resolved incident' + (n > 1 ? 's' : '') + '?')) {
+    found = null; clearResolved();
+  }
+});
+
+$('clearAll').addEventListener('click', () => {
+  const all = records.toArray();
+  if (!all.length) { alert('There are no incidents to clear.'); return; }
+  const open = all.filter(r => r.status !== 'Resolved');
+  const urgent = open.filter(r => r.urgent).length;
+  const warn = open.length
+    ? '\n\nWARNING: ' + open.length + ' are still unresolved' + (urgent ? ' (' + urgent + ' urgent)' : '') + '.'
+    : '';
+  if (confirm('Delete ALL ' + all.length + ' incidents? This cannot be undone.' + warn)) {
+    found = null; clearAll();
+  }
+});
+render();
+</script>
+</body>
+</html>
